@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ar">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>IPv4 → IPv6-mapped converter</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; max-width:900px; margin:28px auto; padding:12px; color:#111; }
+    h1 { font-size:1.6rem; margin-bottom:6px; }
+    p { margin-top:0; color:#444; }
+    textarea { width:100%; min-height:120px; padding:8px; font-family:monospace; box-sizing:border-box; border:1px solid #ccc; border-radius:6px; }
+    .row { display:flex; gap:8px; margin-top:10px; }
+    button { padding:8px 12px; border-radius:6px; border:1px solid #2b6cb0; background:#2b6cb0; color:white; cursor:pointer; }
+    button.secondary { background:#eee; color:#111; border-color:#bbb; }
+    pre { background:#f7fafc; padding:10px; border-radius:6px; white-space:pre-wrap; word-break:break-all; border:1px solid #e2e8f0; }
+    .small { font-size:0.9rem; color:#555; }
+    .error { color:#a00; margin-top:8px; }
+    .good { color:#0a7; margin-top:8px; }
+    label { font-weight:600; display:block; margin-bottom:6px; }
+    .controls { margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; }
+  </style>
+</head>
+<body>
+  <h1>IPv4 → IPv6-mapped converter</h1>
+  <p class="small">دخل list dyal IPv4 (line per IP, aw separated b spaces/commas). Klick "Convert" w gha-ytla3 lik l-links b-format <code>http://[::ffff:xxxx:yyyy]/</code></p>
+
+  <label for="input">Input (IPs)</label>
+  <textarea id="input" placeholder="مثال:
+108.62.98.235
+192.0.2.1, 8.8.8.8"></textarea>
+
+  <div class="controls">
+    <button id="convertBtn">Convert</button>
+    <button id="clearBtn" class="secondary">Clear</button>
+    <button id="copyBtn" class="secondary">Copy results</button>
+  </div>
+
+  <div id="msg" class="error" aria-live="polite"></div>
+
+  <h2 style="margin-top:18px; font-size:1.1rem;">Results</h2>
+  <pre id="results" aria-live="polite">— no results yet —</pre>
+
+  <script>
+    // Helper: validate IPv4
+    function isValidIPv4(s) {
+      // strict: four octets 0-255, no leading zeros requirement (we allow "0" or "00" but we will parse as decimal)
+      const parts = s.split('.');
+      if (parts.length !== 4) return false;
+      for (const p of parts) {
+        if (p === '') return false;
+        // reject non-decimal characters
+        if (!/^\d+$/.test(p)) return false;
+        const n = Number(p);
+        if (Number.isNaN(n) || n < 0 || n > 255) return false;
+        // optional: disallow leading zeros like "01"? we'll accept them but treat as decimal
+        if (p.length > 1 && p[0] === '0') {
+          // still accept, but it's fine
+        }
+      }
+      return true;
+    }
+
+    // Convert IPv4 string to mapped hex groups xxxx:yyyy
+    function ipv4ToMappedHex(ip) {
+      const oct = ip.split('.').map(x => Number(x));
+      // compute first group = a<<8 | b ; second = c<<8 | d
+      const g1 = (oct[0] << 8) | oct[1];
+      const g2 = (oct[2] << 8) | oct[3];
+      // convert to 4-digit lowercase hex
+      const hx1 = g1.toString(16).padStart(4, '0');
+      const hx2 = g2.toString(16).padStart(4, '0');
+      return `${hx1}:${hx2}`;
+    }
+
+    // Normalize: split input into IP tokens (lines, commas, spaces)
+    function extractIPs(text) {
+      // Replace commas with newlines, then split by whitespace or newline
+      const replaced = text.replace(/,/g, '\n');
+      const tokens = replaced.split(/\s+/).map(t => t.trim()).filter(Boolean);
+      return tokens;
+    }
+
+    const inputEl = document.getElementById('input');
+    const convertBtn = document.getElementById('convertBtn');
+    const resultsEl = document.getElementById('results');
+    const msgEl = document.getElementById('msg');
+    const copyBtn = document.getElementById('copyBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    convertBtn.addEventListener('click', () => {
+      msgEl.textContent = '';
+      const raw = inputEl.value;
+      if (!raw.trim()) {
+        msgEl.textContent = 'دخل شي IPs باش نبدلو.';
+        return;
+      }
+      const tokens = extractIPs(raw);
+      if (tokens.length === 0) {
+        msgEl.textContent = 'ما لقيتش شي IPs فالنص.';
+        return;
+      }
+
+      const results = [];
+      const errors = [];
+      for (const t of tokens) {
+        if (isValidIPv4(t)) {
+          const mapped = ipv4ToMappedHex(t);
+          results.push(`[::ffff:${mapped}]`);
+        } else {
+          errors.push(t);
+        }
+      }
+
+      if (results.length === 0) {
+        resultsEl.textContent = 'No valid IPv4 addresses found.';
+        msgEl.textContent = errors.length ? `Invalid IPs: ${errors.join(', ')}` : 'Input empty or invalid.';
+        return;
+      }
+
+      // show results, one per line
+      resultsEl.textContent = results.join('\n');
+      if (errors.length) {
+        msgEl.innerHTML = `<span class="error">Invalid: ${errors.join(', ')}</span>`;
+      } else {
+        msgEl.innerHTML = `<span class="good">Converted ${results.length} IP(s).</span>`;
+      }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const text = resultsEl.textContent;
+      if (!text || text.trim().startsWith('— no results')) {
+        msgEl.textContent = 'ما كاين حتى result باش ن-copy.';
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        msgEl.innerHTML = `<span class="good">Copied ${text.split('\n').length} line(s) to clipboard.</span>`;
+      } catch (e) {
+        msgEl.textContent = 'Clipboard failed — حاول copy manually.';
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      inputEl.value = '';
+      resultsEl.textContent = '— no results yet —';
+      msgEl.textContent = '';
+    });
+
+    // optional: support Enter (Ctrl+Enter) to convert
+    inputEl.addEventListener('keydown', (ev) => {
+      if (ev.ctrlKey && ev.key === 'Enter') {
+        ev.preventDefault();
+        convertBtn.click();
+      }
+    });
+
+    // sample placeholder
+    inputEl.value = '108.62.98.235\n8.8.8.8, 192.0.2.1';
+  </script>
+</body>
+</html>
